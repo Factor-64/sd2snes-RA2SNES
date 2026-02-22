@@ -59,7 +59,7 @@ GPIO_PULLDOWN(reg,b)  = _PINMODE_REG(reg,b) = (_PINMODE_REG(reg,b) |  (3 << (2*(
 GPIO_PULLNONE(reg,b)  = _PINMODE_REG(reg,b) = (_PINMODE_REG(reg,b) & ~(3 << (2*(b&15)))) | (2 << (2*(b&15)))
 GPIO_SPEED(reg,b,sp)  =
 
-CONFIG_UART_NUM	         = 3
+CONFIG_UART_NUM	= 3
 CONFIG_CPU_FREQUENCY     = 96000000
 CONFIG_UART_PCLKDIV      = 1
 CONFIG_UART_TX_BUF_SHIFT = 8

@@ -412,8 +412,6 @@ int usbint_server_dat() {
 
 int usbint_server_reset() { return reset_state; }
 
-uint8_t usbint_server_nmi() { return nmi_state; }
-
 void usbint_check_connect(void) {
     static unsigned connected_prev = 0;
 
@@ -450,12 +448,14 @@ static uint8_t current_size = 0;
 static uint8_t ingame = 0;
 
 static usbint_vector_t vectors[VECTORS_SIZE];
-//static int reset_ticks = 0;
+
+uint8_t usbint_server_nmi() { return nmi_state; }
 
 void usbint_set_game_state(uint8_t state)
 {
     ingame = state;
 }
+//static int reset_ticks = 0;
 
 int usbint_handler(void) {
     int ret = 0;
@@ -851,75 +851,89 @@ int usbint_handler_dat(void) {
         }
         else if (server_info.space == USBINT_SERVER_SPACE_NMI) 
         {
-            static uint8_t vector_index = 0;
+            static uint8_t  vector_index  = 0;
             static uint16_t vector_offset = 0;
-            static uint8_t meta[3];
-            static uint8_t meta_index = 0;
-            static uint8_t flag = 0;
-            if(!current_size || !ingame)
+            static uint8_t  meta[3];
+            static uint8_t  meta_index = 0;
+            static uint8_t  flag = 0;
+
+            if (!nmi_state)
             {
-                memset((unsigned char *)send_buffer[send_buffer_index], 0xFF, server_info.block_size);
-                count += server_info.block_size;
+                if (count == 0)
+                nmi_state = 1;
+                meta_index = 0;
+                meta[0] = ingame;
+                meta[1] = !current_size || !ingame;
+                uint8_t buffer[3];
+                snescmd_readblock(buffer, 0x2A01, 3);
+                uint8_t patched = !(buffer[0] == 0 && buffer[2] == 0);
+                meta[2] = patched;
+
+                bytesSent = server_info.block_size;
+                count    += server_info.block_size;
             }
             else
             {
-                if(count == 0)
+                if (count == server_info.block_size && !meta[1])
                 {
-                    nmi_state = 1;
-                    meta[0] = ingame;
+                    //nmi_state = 2;
                     uint8_t nmi = snescmd_readbyte(NMI_COUNTER);
-                    while(nmi == snescmd_readbyte(NMI_COUNTER))
+                    while (nmi == snescmd_readbyte(NMI_COUNTER))
                     {
                         usbint_check_connect();
                         meta[1] = get_snes_reset();
-                        if(!connected || meta[1]) break;
+                        if (!connected || meta[1]) break;
+                        delay_us(12);
                     }
                 }
-                if(!flag)
+                if (!flag)
                 {
                     do {
-                        meta[1] = get_snes_reset();
+                        if (!meta[1])
+                            meta[1] = get_snes_reset();
                         usbint_vector_t *vec = &vectors[vector_index];
-                        UINT bytesRead = 0;
+
                         UINT remainingBytes = min(server_info.block_size - bytesSent, vec->size - vector_offset);
-                        if(meta[1])
+                        UINT bytesRead = 0;
+                        if (meta[1])
                             bytesRead = remainingBytes;
                         else
                             bytesRead = sram_readblock((uint8_t *)send_buffer[send_buffer_index] + bytesSent, vec->addr + vector_offset, remainingBytes);
-                        bytesSent     += bytesRead; 
-                        vector_offset += bytesRead; 
-                        count         += bytesRead; 
-                        if (vector_offset >= vec->size) 
-                        { 
-                            vector_index++; 
+
+                        bytesSent     += bytesRead;
+                        vector_offset += bytesRead;
+                        count         += bytesRead;
+
+                        if (vector_offset >= vec->size)
+                        {
+                            ++vector_index;
                             vector_offset = 0;
+
                             if (vector_index >= current_size)
                             {
                                 vector_index = 0;
-                                meta_index = 0;
-                                uint8_t buffer[3];
-                                snescmd_readblock((uint8_t *)buffer, 0x2A01, 3);
-                                uint8_t patched = !(buffer[0] == 0 && buffer[2] == 0);
-                                meta[2] = patched;
+                                meta_index   = 0;
+
                                 uint16_t left = server_info.block_size - bytesSent;
-                                if(left > 3)
+                                if (left > 3)
                                     left = 3;
                                 else
                                     flag = 1;
+
                                 count += left;
-                                while(left > 0)
-                                {
+
+                                while (left--)
                                     send_buffer[send_buffer_index][bytesSent++] = meta[meta_index++];
-                                    --left;
-                                }
+
                                 break;
                             }
                         }
+
                     } while (bytesSent != server_info.block_size && count < server_info.size);
                 }
                 else
                 {
-                    while(meta_index < 3)
+                    while (meta_index < 3)
                     {
                         send_buffer[send_buffer_index][bytesSent++] = meta[meta_index++];
                     }

@@ -1,6 +1,23 @@
 CORE = base
 
-VSRC = address.v cheat.v clk_test.v dac.v dcm.v bsx.v rtc.v srtc.v main.v mcu_cmd.v msu.v sd_dma.v spi.v
+VSRC = \
+    address.v \
+    bsx.v \
+    cheat.v \
+    clk_test.v \
+    config.vh \
+    ctx.v \
+    dac.v \
+    dcm.v \
+    dma.v \
+    main.v \
+    mcu_cmd.v \
+    msu.v \
+    rtc.v \
+    sd_dma.v \
+    spi.v \
+    srtc.v
+
 VHSRC =
 
 COMMON_IP = dac_buf msu_databuf snescmd_buf

@@ -14,8 +14,8 @@ T = @echo -e "\e]0;$(1)\a"
 # anymore.
 # so set JAVA_OPTS / _JAVA_OPTIONS (depending on Oracle/OpenJDK)
 # to ignore unrecognized switches:
-export JAVA_OPTS := "-XX:+IgnoreUnrecognizedVMOptions"
-export _JAVA_OPTIONS := "-XX:+IgnoreUnrecognizedVMOptions"
+# export JAVA_OPTS := "-XX:+IgnoreUnrecognizedVMOptions"
+# export _JAVA_OPTIONS := "-XX:+IgnoreUnrecognizedVMOptions"
 
 
 # these are relative to the core subdir, not the path of common.mk

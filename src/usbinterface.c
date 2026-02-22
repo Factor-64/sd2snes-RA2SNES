@@ -82,7 +82,7 @@ static inline void __DMB2(void) { asm volatile ("dmb" ::: "memory"); }
   OP(USBINT_SERVER_STATE_HANDLE_REQDAT)     \
   OP(USBINT_SERVER_STATE_HANDLE_STREAM)     \
                                             \
-  OP(USBINT_SERVER_STATE_HANDLE_LOCK)
+  OP(USBINT_SERVER_STATE_HANDLE_LOCK)       
 enum usbint_server_state_e { FOREACH_SERVER_STATE(GENERATE_ENUM) };
 #ifdef DEBUG_USB
 static const char *usbint_server_state_s[] = { FOREACH_SERVER_STATE(GENERATE_STRING) };
@@ -124,7 +124,7 @@ enum usbint_server_stream_state_e { FOREACH_SERVER_STREAM_STATE(GENERATE_ENUM) }
   OP(USBINT_SERVER_OPCODE_STREAM)               \
   OP(USBINT_SERVER_OPCODE_TIME)                 \
                                                 \
-  OP(USBINT_SERVER_OPCODE_RESPONSE)
+  OP(USBINT_SERVER_OPCODE_RESPONSE)             
 enum usbint_server_opcode_e { FOREACH_SERVER_OPCODE(GENERATE_ENUM) };
 #ifdef DEBUG_USB
 static const char *usbint_server_opcode_s[] = { FOREACH_SERVER_OPCODE(GENERATE_STRING) };
@@ -136,7 +136,9 @@ static const char *usbint_server_opcode_s[] = { FOREACH_SERVER_OPCODE(GENERATE_S
   OP(USBINT_SERVER_SPACE_MSU)                   \
   OP(USBINT_SERVER_SPACE_CMD)                   \
   OP(USBINT_SERVER_SPACE_CONFIG)                \
-  OP(USBINT_SERVER_SPACE_CFG)
+  OP(USBINT_SERVER_SPACE_CFG)                   \
+  OP(USBINT_SERVER_SPACE_NMI)                   \
+  OP(USBINT_SERVER_SPACE_VECTOR)
 
 enum usbint_server_space_e { FOREACH_SERVER_SPACE(GENERATE_ENUM) };
 #ifdef DEBUG_USB
@@ -158,6 +160,7 @@ enum usbint_server_flags_e { FOREACH_SERVER_FLAGS(GENERATE_ENUM) };
 volatile enum usbint_server_state_e server_state = USBINT_SERVER_STATE_IDLE;
 volatile enum usbint_server_stream_state_e stream_state;
 static int reset_state = 0;
+static uint8_t nmi_state = 0;
 volatile static int cmdDat = 0;
 volatile static unsigned connected = 0;
 
@@ -409,6 +412,8 @@ int usbint_server_dat() {
 
 int usbint_server_reset() { return reset_state; }
 
+uint8_t usbint_server_nmi() { return nmi_state; }
+
 void usbint_check_connect(void) {
     static unsigned connected_prev = 0;
 
@@ -417,29 +422,52 @@ void usbint_check_connect(void) {
             server_state = USBINT_SERVER_STATE_IDLE;
             server_info.data_ready = 0;
             cmdDat = 0;
+            nmi_state = 0;
         }
         //set_usb_status(connected ? USB_SNES_STATUS_SET_CONNECTED : USB_SNES_STATUS_CLR_CONNECTED);
 
-        PRINT_FUNCTION();
-        PRINT_MSG(connected ? "[open]" : "[clos]");
-        PRINT_END();
+        //PRINT_FUNCTION();
+        //PRINT_MSG(connected ? "[open]" : "[clos]");
+        //PRINT_END();
 
         connected_prev = connected;
     }
 }
 
-// top level state machine
+#define NMI_COUNTER 0x2C0A
+#define VGET_LENGTH (NMI_COUNTER + 1)
+#define VGET_DATA   (NMI_COUNTER + 2)
+#define VECTORS_SIZE 124
+#define VECTOR_SIZE 4
+#define VECTORS_DATA_SIZE (VECTORS_SIZE * VECTOR_SIZE)
+
+typedef struct {
+    uint32_t addr;  // 24-bit address
+    uint16_t size;  // size in bytes
+} usbint_vector_t;
+
+static uint8_t current_size = 0;
+static uint8_t ingame = 0;
+
+static usbint_vector_t vectors[VECTORS_SIZE];
+//static int reset_ticks = 0;
+
+void usbint_set_game_state(uint8_t state)
+{
+    ingame = state;
+}
+
 int usbint_handler(void) {
     int ret = 0;
 
     usbint_check_connect();
 
     switch(server_state) {
-            case USBINT_SERVER_STATE_HANDLE_CMD: ret = usbint_handler_cmd(); break;
-            // FIXME: are these needed anymore?  PUSHDAT was for non-interrupt operation and EXE uses flags now
-            case USBINT_SERVER_STATE_HANDLE_DATPUSH: ret = usbint_handler_dat(); break;
+    case USBINT_SERVER_STATE_HANDLE_CMD: ret = usbint_handler_cmd(); break;
+    // FIXME: are these needed anymore?  PUSHDAT was for non-interrupt operation and EXE uses flags now
+    case USBINT_SERVER_STATE_HANDLE_DATPUSH: ret = usbint_handler_dat(); break;
 
-            default: break;
+    default: break;
     }
 
     return ret;
@@ -490,6 +518,16 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[257]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[258]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[259]; server_info.offset <<= 0;
+            if(server_info.offset == 0xFFFFFF)
+            {
+                server_info.space = USBINT_SERVER_SPACE_NMI;
+            }
+            else if(server_info.offset == 0xFFFFFE)
+            {
+                current_size = 0;
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
+            }
+
         }
         break;
     }
@@ -528,6 +566,16 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[33 + server_info.vector_count * 4]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[34 + server_info.vector_count * 4]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[35 + server_info.vector_count * 4]; server_info.offset <<= 0;
+
+            if(server_info.offset == 0xFFFFFF)
+            {
+                server_info.space = USBINT_SERVER_SPACE_NMI;
+            }
+            else if(server_info.offset == 0xFFFFFE)
+            {
+                current_size = 0;
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
+            }
 
             //for (unsigned i = 0; i < 8; i++) {
             //    unsigned offset = 0;
@@ -657,7 +705,7 @@ int usbint_handler_cmd(void) {
         }
     }
 
-    PRINT_STATE(server_state);
+    //PRINT_STATE(server_state);
 
     // decide next state
     if (server_info.opcode == USBINT_SERVER_OPCODE_GET || server_info.opcode == USBINT_SERVER_OPCODE_VGET || server_info.opcode == USBINT_SERVER_OPCODE_LS) {
@@ -673,15 +721,15 @@ int usbint_handler_cmd(void) {
     else {
         server_state = USBINT_SERVER_STATE_IDLE;
     }
-    PRINT_STATE(server_state);
+    //PRINT_STATE(server_state);
 
-    PRINT_CMD(cmd_buffer);
+    //PRINT_CMD(cmd_buffer);
 
     if (server_info.opcode == USBINT_SERVER_OPCODE_BOOT) {
         printf("Boot name: %s ", (char *)file_lfn);
     }
 
-    PRINT_END();
+    //PRINT_END();
 
     // create response
     send_buffer[send_buffer_index][0] = 'U';
@@ -736,8 +784,8 @@ int usbint_handler_cmd(void) {
     // send response.  also triggers data interrupt.
     server_info.data_ready = (server_state == USBINT_SERVER_STATE_HANDLE_DAT) || (server_state == USBINT_SERVER_STATE_HANDLE_STREAM);
     //__DMB2();
-    DBG_USBHW printf("send_block: \n");
-    DBG_USBHW uart_trace((void*)send_buffer[send_buffer_index], 0, USB_BLOCK_SIZE);
+    //DBG_USBHW printf("send_block: \n");
+    //DBG_USBHW uart_trace((void*)send_buffer[send_buffer_index], 0, USB_BLOCK_SIZE);
     if (!(server_info.flags & USBINT_SERVER_FLAGS_NORESP)) {
         usbint_send_block(USB_BLOCK_SIZE);
     }
@@ -800,6 +848,117 @@ int usbint_handler_dat(void) {
             if (count >= server_info.size) {
                 f_close(&fh);
             }
+        }
+        else if (server_info.space == USBINT_SERVER_SPACE_NMI) 
+        {
+            static uint8_t vector_index = 0;
+            static uint16_t vector_offset = 0;
+            static uint8_t meta[3];
+            static uint8_t meta_index = 0;
+            static uint8_t flag = 0;
+            if(!current_size || !ingame)
+            {
+                memset((unsigned char *)send_buffer[send_buffer_index], 0xFF, server_info.block_size);
+                count += server_info.block_size;
+            }
+            else
+            {
+                if(count == 0)
+                {
+                    nmi_state = 1;
+                    meta[0] = ingame;
+                    uint8_t nmi = snescmd_readbyte(NMI_COUNTER);
+                    while(nmi == snescmd_readbyte(NMI_COUNTER))
+                    {
+                        usbint_check_connect();
+                        meta[1] = get_snes_reset();
+                        if(!connected || meta[1]) break;
+                    }
+                }
+                if(!flag)
+                {
+                    do {
+                        meta[1] = get_snes_reset();
+                        usbint_vector_t *vec = &vectors[vector_index];
+                        UINT bytesRead = 0;
+                        UINT remainingBytes = min(server_info.block_size - bytesSent, vec->size - vector_offset);
+                        if(meta[1])
+                            bytesRead = remainingBytes;
+                        else
+                            bytesRead = sram_readblock((uint8_t *)send_buffer[send_buffer_index] + bytesSent, vec->addr + vector_offset, remainingBytes);
+                        bytesSent     += bytesRead; 
+                        vector_offset += bytesRead; 
+                        count         += bytesRead; 
+                        if (vector_offset >= vec->size) 
+                        { 
+                            vector_index++; 
+                            vector_offset = 0;
+                            if (vector_index >= current_size)
+                            {
+                                vector_index = 0;
+                                meta_index = 0;
+                                uint8_t buffer[3];
+                                snescmd_readblock((uint8_t *)buffer, 0x2A01, 3);
+                                uint8_t patched = !(buffer[0] == 0 && buffer[2] == 0);
+                                meta[2] = patched;
+                                uint16_t left = server_info.block_size - bytesSent;
+                                if(left > 3)
+                                    left = 3;
+                                else
+                                    flag = 1;
+                                count += left;
+                                while(left > 0)
+                                {
+                                    send_buffer[send_buffer_index][bytesSent++] = meta[meta_index++];
+                                    --left;
+                                }
+                                break;
+                            }
+                        }
+                    } while (bytesSent != server_info.block_size && count < server_info.size);
+                }
+                else
+                {
+                    while(meta_index < 3)
+                    {
+                        send_buffer[send_buffer_index][bytesSent++] = meta[meta_index++];
+                    }
+                    count += bytesSent;
+                    flag = 0;
+                }
+            }
+        }
+        else if (server_info.space == USBINT_SERVER_SPACE_VECTOR)
+        {
+            uint8_t new_size = snescmd_readbyte(VGET_LENGTH);
+            if(new_size > VECTORS_SIZE)
+                new_size = 0;
+            if (new_size != current_size)
+            {
+                current_size = new_size;
+                if(current_size)
+                {
+                    uint8_t buffer[VECTORS_DATA_SIZE];
+                    uint16_t vector_bytes = current_size * VECTOR_SIZE;
+                    snescmd_readblock(buffer, VGET_DATA, vector_bytes);
+
+                    for (uint8_t i = 0; i < current_size; ++i) 
+                    {
+                        uint8_t* p = &buffer[i * VECTOR_SIZE];
+                        vectors[i].addr = ((uint32_t)p[0] << 16)
+                                        | ((uint32_t)p[1] <<  8)
+                                        |  (uint32_t)p[2];
+                        uint8_t size = p[3];
+                        if(size) 
+                            vectors[i].size = size;
+                        else
+                            vectors[i].size = 256;
+                    }
+                }
+            }
+            send_buffer[send_buffer_index][0] = current_size;
+            bytesSent += server_info.block_size;
+            count += bytesSent;
         }
         else {
             //PRINT_MSG("[dat]")
@@ -995,7 +1154,7 @@ int usbint_handler_dat(void) {
                 //PRINT_DAT((int)count, (int)server_info.size);
 
                 count = 0;
-
+                nmi_state = 0;
                 //PRINT_END();
             }
         }

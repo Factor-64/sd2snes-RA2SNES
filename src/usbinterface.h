@@ -118,6 +118,9 @@ int usbint_server_busy(void);
 int usbint_server_dat(void);
 int usbint_server_reset(void);
 
+uint8_t usbint_server_nmi(void);
+
+void usbint_set_game_state(uint8_t state);
 // menu/game state machine
 int usbint_handler(void);
 //void usbint_handler_server(void);

@@ -537,23 +537,6 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   // Combined WRAM + SRAM snapshot
   uint32_t total_len = 0x040000 + romprops.sramsize_bytes;   // WRAM (256 KB) + SRAM
 
-  // --- Automatic WRAM+SRAM snapshot DMA (F5_0000 → FA_0000) ---
-  fpga_write_config(0x03, 0x01, 0xF5, 0x00);   // SRC bank
-  fpga_write_config(0x03, 0x05, 0x00, 0x00);   // SRC mid
-  fpga_write_config(0x03, 0x04, 0x00, 0x00);   // SRC low
-
-  fpga_write_config(0x03, 0x00, 0xFA, 0x00);   // DST bank
-  fpga_write_config(0x03, 0x03, 0x00, 0x00);
-  fpga_write_config(0x03, 0x02, 0x00, 0x00);
-
-  // LEN = WRAM + SRAM
-  fpga_write_config(0x03, 0x08, (total_len >> 16) & 0xFF, 0x00);
-  fpga_write_config(0x03, 0x07, (total_len >> 8) & 0xFF, 0x00);
-  fpga_write_config(0x03, 0x06, (total_len >> 0) & 0xFF, 0x00);
-
-  // Enable AUTO_FRAME_TRIG
-  fpga_write_config(0x03, 0x09, 0x10, 0x00);
-
   return (uint32_t)filesize;
 
 }

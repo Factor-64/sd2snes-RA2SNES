@@ -534,9 +534,6 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   sram_crc_init = 1;
   sram_crc_romsize = filesize - romprops.offset;
 
-  // Combined WRAM + SRAM snapshot
-  uint32_t total_len = 0x040000 + romprops.sramsize_bytes;   // WRAM (256 KB) + SRAM
-
   return (uint32_t)filesize;
 
 }

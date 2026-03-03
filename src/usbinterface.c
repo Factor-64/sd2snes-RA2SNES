@@ -210,7 +210,7 @@ void usbint_set_state(unsigned open) {
 }
 
 #define NMI_COUNTER 0x2C0A
-#define VECTORS_SIZE 64
+#define VECTORS_SIZE 255
 #define VECTOR_SIZE 4
 
 typedef struct {
@@ -220,7 +220,7 @@ typedef struct {
 
 static uint8_t current_size = 0;
 static uint8_t ingame = 0;
-static uint8_t vector_index  = 0;
+static uint8_t vector_index = 0;
 
 static usbint_vector_t vectors[VECTORS_SIZE];
 
@@ -327,6 +327,36 @@ void usbint_recv_block(void) {
                 count += bytesWritten;
             } while (bytesRecv != server_info.block_size && count < server_info.size);
         }
+        else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
+            static uint8_t temp_vector_bytes[4];
+            static uint8_t temp_index = 0;
+            UINT blockBytesWritten = 0;
+            do {   
+                temp_vector_bytes[temp_index++] = recv_buffer[blockBytesWritten];
+                ++blockBytesWritten;
+                ++count;
+
+                if (temp_index == 4) 
+                {
+                    if (vector_index < VECTORS_SIZE)
+                    {
+                        vectors[vector_index].addr =
+                            (temp_vector_bytes[0] << 16) |
+                            (temp_vector_bytes[1] << 8)  |
+                            (temp_vector_bytes[2]);
+                        
+                        vectors[vector_index].size = temp_vector_bytes[3];
+
+                        ++vector_index;
+                    }
+                    else
+                    {
+                        vector_index = 0;
+                    }
+                    temp_index = 0;
+                }
+            } while (blockBytesWritten != server_info.block_size && count < server_info.size);
+        }
         else {
             // write SRAM or CONFIG
             UINT blockBytesWritten = 0;
@@ -341,38 +371,6 @@ void usbint_recv_block(void) {
                     UINT remainingBytes = min(server_info.block_size - blockBytesWritten, server_info.size - count);
                     bytesWritten = snescmd_writeblock(recv_buffer + blockBytesWritten, server_info.offset + count, remainingBytes);
                 }
-                else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
-                    static uint8_t temp_vector_bytes[4];
-                    static uint8_t temp_index = 0;
-                    while (blockBytesWritten < server_info.block_size && count < server_info.size) 
-                    {
-                        temp_vector_bytes[temp_index++] = recv_buffer[blockBytesWritten];
-                        ++blockBytesWritten;
-                        ++count;
-
-                        if (temp_index == 4) 
-                        {
-                            if (vector_index < current_size)
-                            {
-                                vectors[vector_index].addr =
-                                    (temp_vector_bytes[0] << 16) |
-                                    (temp_vector_bytes[1] << 8)  |
-                                    (temp_vector_bytes[2]);
-                                
-                                vectors[vector_index].size = temp_vector_bytes[3];
-
-                                vector_index++;
-                            }
-                            else
-                            {
-                                vector_index = 0;
-                            }
-                            temp_index = 0;
-                        }
-                    }
-                    bytesWritten = blockBytesWritten;
-                }
-
                 else {
                     uint8_t group = server_info.size & 0xFF;
                     uint8_t index = server_info.offset & 0xFF;
@@ -547,6 +545,21 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[258]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[259]; server_info.offset <<= 0;
         }
+        
+        if (server_info.offset == 0xFFFFFF)
+        {
+            server_info.space = USBINT_SERVER_SPACE_NMI;
+        }
+        else if (server_info.offset == 0xFFFFFD)
+        {
+            uint32_t size = server_info.total_size;
+            if(size > VECTORS_SIZE)
+                current_size = VECTORS_SIZE;
+            else
+                current_size = size;
+            vector_index = 0;
+            server_info.space = USBINT_SERVER_SPACE_VECTOR;
+        }
         break;
     }
     case USBINT_SERVER_OPCODE_PUT: {
@@ -559,13 +572,9 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[257]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[258]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[259]; server_info.offset <<= 0;
-            if (server_info.offset == 0xFFFFFF)
+
+            if (server_info.offset == 0xFFFFFE)
             {
-                vector_index = 0;
-                nmi_state = 0;
-                current_size = server_info.size / 4;
-                if (current_size > VECTORS_SIZE)
-                    current_size = VECTORS_SIZE;
                 server_info.space = USBINT_SERVER_SPACE_VECTOR;
             }
         }
@@ -596,8 +605,23 @@ int usbint_handler_cmd(void) {
 
             if (server_info.offset == 0xFFFFFF)
             {
-                server_info.space = USBINT_SERVER_SPACE_NMI;
                 server_info.size = server_info.total_size;
+                server_info.space = USBINT_SERVER_SPACE_NMI;
+            }
+            else if (server_info.offset == 0xFFFFFE)
+            {
+                server_info.size = server_info.total_size;
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
+            }
+            else if (server_info.offset == 0xFFFFFD)
+            {
+                uint32_t size = server_info.total_size;
+                if(size > VECTORS_SIZE)
+                    current_size = VECTORS_SIZE;
+                else
+                    current_size = size;
+                vector_index = 0;
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
             }
 
             //for (unsigned i = 0; i < 8; i++) {
@@ -942,8 +966,6 @@ int usbint_handler_dat(void) {
 
                             while (left--)
                                 send_buffer[send_buffer_index][bytesSent++] = meta[meta_index++];
-
-                            break;
                         }
                     }
 
@@ -959,6 +981,11 @@ int usbint_handler_dat(void) {
                 flag = 0;
                 nmi_state = 0;
             }
+        }
+        else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
+            memset((unsigned char *)send_buffer[send_buffer_index], 0xFF, server_info.block_size);
+            bytesSent = server_info.block_size;
+            count += bytesSent;
         }
         else {
             //PRINT_MSG("[dat]")

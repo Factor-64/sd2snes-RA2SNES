@@ -136,7 +136,9 @@ static const char *usbint_server_opcode_s[] = { FOREACH_SERVER_OPCODE(GENERATE_S
   OP(USBINT_SERVER_SPACE_MSU)                   \
   OP(USBINT_SERVER_SPACE_CMD)                   \
   OP(USBINT_SERVER_SPACE_CONFIG)                \
-  OP(USBINT_SERVER_SPACE_CFG)
+  OP(USBINT_SERVER_SPACE_CFG)                   \
+  OP(USBINT_SERVER_SPACE_NMI)                   \
+  OP(USBINT_SERVER_SPACE_VECTOR)
 
 enum usbint_server_space_e { FOREACH_SERVER_SPACE(GENERATE_ENUM) };
 #ifdef DEBUG_USB
@@ -205,6 +207,22 @@ extern cfg_t CFG;
 void usbint_set_state(unsigned open) {
     connected = open;
 }
+
+#define NMI_COUNTER 0x2C0A
+#define VECTORS_SIZE 255
+#define VECTOR_SIZE 4
+
+typedef struct {
+    uint32_t addr;
+    uint8_t size;
+} usbint_vector_t;
+
+static uint8_t current_size = 0;
+static uint8_t ingame       = 0;
+static uint8_t vector_index = 0;
+static uint8_t nmi_state    = 0;
+
+static usbint_vector_t vectors[VECTORS_SIZE];
 
 // TODO: New Design
 // - Unify interrupt handler and RAM/FILE IO
@@ -308,6 +326,32 @@ void usbint_recv_block(void) {
                 //server_info.offset += bytesWritten;
                 count += bytesWritten;
             } while (bytesRecv != server_info.block_size && count < server_info.size);
+        }
+        else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
+            static uint8_t temp_vector_bytes[4];
+            static uint8_t temp_index = 0;
+            UINT blockBytesWritten = 0;
+            do {   
+                temp_vector_bytes[temp_index++] = recv_buffer[blockBytesWritten];
+                ++blockBytesWritten;
+                ++count;
+
+                if (temp_index == 4) {
+                    if (vector_index < VECTORS_SIZE) {
+                        vectors[vector_index].addr =
+                            (temp_vector_bytes[0] << 16) |
+                            (temp_vector_bytes[1] << 8)  |
+                            (temp_vector_bytes[2]);
+                        
+                        vectors[vector_index].size = temp_vector_bytes[3];
+
+                        ++vector_index;
+                    } else {
+                        vector_index = 0;
+                    }
+                    temp_index = 0;
+                }
+            } while (blockBytesWritten != server_info.block_size && count < server_info.size);
         }
         else {
             // write SRAM or CONFIG
@@ -428,6 +472,10 @@ void usbint_check_connect(void) {
     }
 }
 
+uint8_t usbint_server_nmi() { return nmi_state; }
+
+void usbint_set_game_state(uint8_t state) { ingame = state; }
+
 // top level state machine
 int usbint_handler(void) {
     int ret = 0;
@@ -490,6 +538,20 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[257]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[258]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[259]; server_info.offset <<= 0;
+
+
+            if (server_info.offset == 0xFFFFFF) {
+                server_info.space = USBINT_SERVER_SPACE_NMI;
+            }
+            else if (server_info.offset == 0xFFFFFD) {
+                uint32_t size = server_info.total_size;
+                if(size > VECTORS_SIZE)
+                    current_size = VECTORS_SIZE;
+                else
+                    current_size = size;
+                vector_index = 0;
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
+            }
         }
         break;
     }
@@ -503,6 +565,9 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[257]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[258]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[259]; server_info.offset <<= 0;
+
+            if (server_info.offset == 0xFFFFFE)
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
         }
         break;
     }
@@ -528,6 +593,24 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[33 + server_info.vector_count * 4]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[34 + server_info.vector_count * 4]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[35 + server_info.vector_count * 4]; server_info.offset <<= 0;
+
+            if (server_info.offset == 0xFFFFFF) {
+                server_info.size = server_info.total_size;
+                server_info.space = USBINT_SERVER_SPACE_NMI;
+            }
+            else if (server_info.offset == 0xFFFFFE) {
+                server_info.size = server_info.total_size;
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
+            }
+            else if (server_info.offset == 0xFFFFFD) {
+                uint32_t size = server_info.total_size;
+                if(size > VECTORS_SIZE)
+                    current_size = VECTORS_SIZE;
+                else
+                    current_size = size;
+                vector_index = 0;
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
+            }
 
             //for (unsigned i = 0; i < 8; i++) {
             //    unsigned offset = 0;
@@ -800,6 +883,97 @@ int usbint_handler_dat(void) {
             if (count >= server_info.size) {
                 f_close(&fh);
             }
+        }
+        else if (server_info.space == USBINT_SERVER_SPACE_NMI) {
+            static uint16_t vector_offset = 0;
+            static uint8_t  meta[3];
+            static uint8_t  meta_index = 0;
+            static uint8_t  flag = 0;
+
+            if (!nmi_state)
+            {
+                nmi_state = 1;
+                meta_index = 0;
+                vector_index = 0;
+                vector_offset = 0;
+                flag = 0;
+                meta[0] = ingame;
+                meta[1] = !current_size || !ingame;
+                uint8_t buffer[3];
+                snescmd_readblock(buffer, 0x2A01, 3);
+                uint8_t patched = !(buffer[0] == 0 && buffer[2] == 0);
+                meta[2] = patched;
+            }
+            if (nmi_state && !meta[1])
+            {
+                uint8_t nmi = snescmd_readbyte(NMI_COUNTER);
+                while (nmi == snescmd_readbyte(NMI_COUNTER))
+                {
+                    usbint_check_connect();
+                    meta[1] = get_snes_reset();
+                    if (!connected || meta[1]) break;
+                    delay_us(12);
+                }
+            }
+            if (!flag)
+            {
+                do {
+                    if (!meta[1])
+                        meta[1] = get_snes_reset();
+                    usbint_vector_t *vec = &vectors[vector_index];
+
+                    UINT remainingBytes = min(server_info.block_size - bytesSent, vec->size - vector_offset);
+                    remainingBytes = min(remainingBytes, server_info.size - count);
+                    UINT bytesRead = 0;
+                    if (meta[1])
+                        bytesRead = remainingBytes;
+                    else
+                        bytesRead = sram_readblock((uint8_t *)send_buffer[send_buffer_index] + bytesSent, vec->addr + vector_offset, remainingBytes);
+
+                    bytesSent     += bytesRead;
+                    vector_offset += bytesRead;
+                    count         += bytesRead;
+
+                    if (vector_offset >= vec->size)
+                    {
+                        ++vector_index;
+                        vector_offset = 0;
+
+                        if (vector_index >= current_size)
+                        {
+                            vector_index = 0;
+                            meta_index   = 0;
+
+                            uint16_t left = min(3, server_info.block_size - bytesSent);
+                            if (left < 3)
+                                flag = 1;
+                            else
+                                nmi_state = 0;
+
+                            count += left;
+
+                            while (left--)
+                                send_buffer[send_buffer_index][bytesSent++] = meta[meta_index++];
+                        }
+                    }
+
+                } while (bytesSent != server_info.block_size && count < server_info.size);
+            }
+            else
+            {
+                while (meta_index < 3)
+                {
+                    send_buffer[send_buffer_index][bytesSent++] = meta[meta_index++];
+                }
+                count += bytesSent;
+                flag = 0;
+                nmi_state = 0;
+            }
+        }
+        else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
+            memset((unsigned char *)send_buffer[send_buffer_index], 0xFF, server_info.block_size);
+            bytesSent = server_info.block_size;
+            count += bytesSent;
         }
         else {
             //PRINT_MSG("[dat]")

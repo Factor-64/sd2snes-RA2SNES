@@ -209,15 +209,21 @@ void usbint_set_state(unsigned open) {
 }
 
 #define NMI_COUNTER 0x2C0A
+<<<<<<< HEAD
 #define VECTORS_SIZE 256
 #define VECTOR_SIZE 4
 #define SNAPSHOT_SIZE 2040
+=======
+#define VECTORS_SIZE 255
+#define VECTOR_SIZE 4
+>>>>>>> 2e0b076 (Added vector and nmi space)
 
 typedef struct {
     uint32_t addr;
     uint8_t size;
 } usbint_vector_t;
 
+<<<<<<< HEAD
 static uint16_t current_size  = 0;
 static uint8_t  ingame        = 0;
 static uint16_t vector_index  = 0;
@@ -228,6 +234,15 @@ static usbint_vector_t vectors[VECTORS_SIZE];
 
 static uint8_t snapshot[SNAPSHOT_SIZE];
 
+=======
+static uint8_t current_size = 0;
+static uint8_t ingame       = 0;
+static uint8_t vector_index = 0;
+static uint8_t nmi_state    = 0;
+
+static usbint_vector_t vectors[VECTORS_SIZE];
+
+>>>>>>> 2e0b076 (Added vector and nmi space)
 // TODO: New Design
 // - Unify interrupt handler and RAM/FILE IO
 // - Add IRQ disable/enable to other code to protect against conflict
@@ -348,7 +363,11 @@ void usbint_recv_block(void) {
                             (temp_vector_bytes[2]);
                         
                         vectors[vector_index].size = temp_vector_bytes[3];
+<<<<<<< HEAD
                         
+=======
+
+>>>>>>> 2e0b076 (Added vector and nmi space)
                         ++vector_index;
                     } else {
                         vector_index = 0;
@@ -357,12 +376,15 @@ void usbint_recv_block(void) {
                 }
             } while (blockBytesWritten != server_info.block_size && count < server_info.size);
         }
+<<<<<<< HEAD
         else if (server_info.space == USBINT_SERVER_SPACE_NMI) {
             current_size  = (recv_buffer[count] << 8) | recv_buffer[count + 1];
             count += 2;
             vectors_total = (recv_buffer[count] << 8) | recv_buffer[count + 1];
             count = server_info.size;
         }
+=======
+>>>>>>> 2e0b076 (Added vector and nmi space)
         else {
             // write SRAM or CONFIG
             UINT blockBytesWritten = 0;
@@ -548,6 +570,20 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[257]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[258]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[259]; server_info.offset <<= 0;
+
+
+            if (server_info.offset == 0xFFFFFF) {
+                server_info.space = USBINT_SERVER_SPACE_NMI;
+            }
+            else if (server_info.offset == 0xFFFFFD) {
+                uint32_t size = server_info.total_size;
+                if(size > VECTORS_SIZE)
+                    current_size = VECTORS_SIZE;
+                else
+                    current_size = size;
+                vector_index = 0;
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
+            }
         }
         break;
     }
@@ -562,6 +598,7 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[258]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[259]; server_info.offset <<= 0;
 
+<<<<<<< HEAD
             if (server_info.offset == 0xFFFFFE) {
                 current_size = 0;
                 nmi_state = 0;
@@ -570,6 +607,10 @@ int usbint_handler_cmd(void) {
             else if (server_info.offset == 0xFFFFFD) {
                 server_info.space = USBINT_SERVER_SPACE_NMI;
             }
+=======
+            if (server_info.offset == 0xFFFFFE)
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
+>>>>>>> 2e0b076 (Added vector and nmi space)
         }
         break;
     }
@@ -601,14 +642,27 @@ int usbint_handler_cmd(void) {
                 server_info.space = USBINT_SERVER_SPACE_NMI;
             }
             else if (server_info.offset == 0xFFFFFE) {
+<<<<<<< HEAD
                 current_size = 0;
                 nmi_state = 0;
+=======
+>>>>>>> 2e0b076 (Added vector and nmi space)
                 server_info.size = server_info.total_size;
                 server_info.space = USBINT_SERVER_SPACE_VECTOR;
             }
             else if (server_info.offset == 0xFFFFFD) {
+<<<<<<< HEAD
                 server_info.size = server_info.total_size;
                 server_info.space = USBINT_SERVER_SPACE_NMI;
+=======
+                uint32_t size = server_info.total_size;
+                if(size > VECTORS_SIZE)
+                    current_size = VECTORS_SIZE;
+                else
+                    current_size = size;
+                vector_index = 0;
+                server_info.space = USBINT_SERVER_SPACE_VECTOR;
+>>>>>>> 2e0b076 (Added vector and nmi space)
             }
 
             //for (unsigned i = 0; i < 8; i++) {
@@ -885,14 +939,21 @@ int usbint_handler_dat(void) {
         }
         else if (server_info.space == USBINT_SERVER_SPACE_NMI) {
             static uint16_t vector_offset = 0;
+<<<<<<< HEAD
             static uint8_t  meta = 0;
             static uint16_t meta_offset = 0;
             static uint8_t  meta_flag = 0;
             static uint32_t nmi_total = 0;
+=======
+            static uint8_t  meta[3];
+            static uint8_t  meta_index = 0;
+            static uint8_t  flag = 0;
+>>>>>>> 2e0b076 (Added vector and nmi space)
 
             if (!nmi_state)
             {
                 nmi_state = 1;
+<<<<<<< HEAD
                 vector_index = 0;
                 vector_offset = 0;
                 meta_flag = 0;
@@ -904,10 +965,26 @@ int usbint_handler_dat(void) {
                 uint8_t buffer[3];
                 snescmd_readblock(buffer, 0x2A01, 3);
                 meta |= ((!(buffer[0] == 0 && buffer[2] == 0)) & 1) << 2;
+=======
+                meta_index = 0;
+                vector_index = 0;
+                vector_offset = 0;
+                flag = 0;
+                meta[0] = ingame;
+                meta[1] = !current_size || !ingame;
+                uint8_t buffer[3];
+                snescmd_readblock(buffer, 0x2A01, 3);
+                uint8_t patched = !(buffer[0] == 0 && buffer[2] == 0);
+                meta[2] = patched;
+            }
+            if (nmi_state && !meta[1])
+            {
+>>>>>>> 2e0b076 (Added vector and nmi space)
                 uint8_t nmi = snescmd_readbyte(NMI_COUNTER);
                 while (nmi == snescmd_readbyte(NMI_COUNTER))
                 {
                     usbint_check_connect();
+<<<<<<< HEAD
                     if (!(meta & (1 << 1)))
                         meta |= (get_snes_reset() & 1) << 1;
                     if ((meta & (1 << 1)) || !connected) break;
@@ -971,6 +1048,67 @@ int usbint_handler_dat(void) {
             count += remaining;
             if (nmi_total >= vectors_total)
                 nmi_state = 0;
+=======
+                    meta[1] = get_snes_reset();
+                    if (!connected || meta[1]) break;
+                    delay_us(12);
+                }
+            }
+            if (!flag)
+            {
+                do {
+                    if (!meta[1])
+                        meta[1] = get_snes_reset();
+                    usbint_vector_t *vec = &vectors[vector_index];
+
+                    UINT remainingBytes = min(server_info.block_size - bytesSent, vec->size - vector_offset);
+                    remainingBytes = min(remainingBytes, server_info.size - count);
+                    UINT bytesRead = 0;
+                    if (meta[1])
+                        bytesRead = remainingBytes;
+                    else
+                        bytesRead = sram_readblock((uint8_t *)send_buffer[send_buffer_index] + bytesSent, vec->addr + vector_offset, remainingBytes);
+
+                    bytesSent     += bytesRead;
+                    vector_offset += bytesRead;
+                    count         += bytesRead;
+
+                    if (vector_offset >= vec->size)
+                    {
+                        ++vector_index;
+                        vector_offset = 0;
+
+                        if (vector_index >= current_size)
+                        {
+                            vector_index = 0;
+                            meta_index   = 0;
+
+                            uint16_t left = min(3, server_info.block_size - bytesSent);
+                            if (left < 3)
+                                flag = 1;
+                            else
+                                nmi_state = 0;
+
+                            count += left;
+
+                            while (left--)
+                                send_buffer[send_buffer_index][bytesSent++] = meta[meta_index++];
+                        }
+                    }
+
+                } while (bytesSent != server_info.block_size && count < server_info.size);
+            }
+            else
+            {
+                while (meta_index < 3)
+                {
+                    send_buffer[send_buffer_index][bytesSent++] = meta[meta_index++];
+                }
+                count += bytesSent;
+                flag = 0;
+                nmi_state = 0;
+            }
+>>>>>>> 2e0b076 (Added vector and nmi space)
         }
         else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
             memset((unsigned char *)send_buffer[send_buffer_index], 0xFF, server_info.block_size);

@@ -211,7 +211,7 @@ void usbint_set_state(unsigned open) {
 #define NMI_COUNTER 0x2C0A
 #define VECTORS_SIZE 320
 #define VECTOR_SIZE 4
-#define SNAPSHOT_SIZE 2043
+#define SNAPSHOT_SIZE 2040
 
 typedef struct {
     uint32_t addr;
@@ -569,6 +569,7 @@ int usbint_handler_cmd(void) {
 
             if (server_info.offset == 0xFFFFFE) {
                 current_size = 0;
+                nmi_state = 0;
                 server_info.space = USBINT_SERVER_SPACE_VECTOR;
             }
             else if (server_info.offset == 0xFFFFFD) {
@@ -606,6 +607,7 @@ int usbint_handler_cmd(void) {
             }
             else if (server_info.offset == 0xFFFFFE) {
                 current_size = 0;
+                nmi_state = 0;
                 server_info.size = server_info.total_size;
                 server_info.space = USBINT_SERVER_SPACE_VECTOR;
             }
@@ -887,52 +889,80 @@ int usbint_handler_dat(void) {
             }
         }
         else if (server_info.space == USBINT_SERVER_SPACE_NMI) {
-            //static uint16_t vector_offset = 0;
-            //static uint8_t  meta[3];
-            //static uint8_t  meta_index = 0;
-            //static uint8_t  flag = 0;
-            static uint8_t reset = 0;
+            static uint16_t vector_offset = 0;
+            static uint8_t  meta[3];
+            static uint8_t  meta_index = 0;
+            static uint8_t  meta_flag = 0;
 
             if (!nmi_state)
             {
                 nmi_state = 1;
-                //meta_index = 0;
+                meta_index = 0;
                 vector_index = 0;
-                reset = !current_size || !ingame;
-                uint8_t patched = 0;
-                //vector_offset = 0;
-                //flag = 0;
-                //meta[0] = ingame;
-                //meta[1] = !current_size || !ingame;
-                if (!reset)
+                vector_offset = 0;
+                meta_flag = 0;
+                meta[0] = ingame;
+                meta[1] = !current_size || !ingame;
+                uint8_t nmi = snescmd_readbyte(NMI_COUNTER);
+                uint8_t buffer[3];
+                snescmd_readblock(buffer, 0x2A01, 3);
+                meta[2] = !(buffer[0] == 0 && buffer[2] == 0);
+                while (nmi == snescmd_readbyte(NMI_COUNTER))
                 {
-                    uint8_t buffer[3];
-                    snescmd_readblock(buffer, 0x2A01, 3);
-                    patched = !(buffer[0] == 0 && buffer[2] == 0);
-                    //meta[2] = patched;
-                    
-                    uint8_t nmi = snescmd_readbyte(NMI_COUNTER);
-                    while (nmi == snescmd_readbyte(NMI_COUNTER) && !reset && connected)
+                    usbint_check_connect();
+                    meta[1] = get_snes_reset();
+                    if(meta[1] || !connected) break;
+                    delay_us(12);
+                }
+            }
+            
+            if(count == 0)
+            {
+                uint16_t offset = 0;
+                if(!meta_flag)
+                {
+                    while (offset < SNAPSHOT_SIZE && vector_index < current_size)
                     {
-                        usbint_check_connect();
-                        reset = get_snes_reset();
-                        delay_us(12);
+                        meta[1] = get_snes_reset();
+
+                        usbint_vector_t *vec = &vectors[vector_index];
+
+                        uint16_t remaining = min(vec->size - vector_offset, SNAPSHOT_SIZE - offset);
+
+                        if (!meta[1])
+                            sram_readblock((uint8_t*)snapshot + offset, vec->addr + vector_offset, remaining);
+
+                        offset        += remaining;
+                        vector_offset += remaining;
+
+                        if (vector_offset >= vec->size)
+                        {
+                            vector_index++;
+                            vector_offset = 0;
+                        }
                     }
 
-                    uint32_t offset = 0;
-                    for (uint8_t i = vector_index; i < current_size && !reset; ++i)
+                    if (vector_index >= current_size)
                     {
-                        reset = get_snes_reset();
-                        usbint_vector_t *vec = &vectors[i];
-                        uint8_t size = vec->size;
-                        sram_readblock((uint8_t *)snapshot + offset, vec->addr, size);
-                        offset += size;
-                        if(offset >= SNAPSHOT_SIZE)
-                            offset = 0;
+                        vector_index = 0;
+                        uint16_t left = min(3, SNAPSHOT_SIZE - offset);
+                        if(left < 3)
+                            meta_flag = 1;
+                        else
+                            nmi_state = 0;
+                        while(left > 0)
+                        {
+                            snapshot[offset++] = meta[meta_index++];
+                            --left;
+                        }
                     }
                 }
-                snapshot[server_info.size - 3] = ingame;
-                snapshot[server_info.size - 1] = patched;
+                else
+                {
+                    while(meta_index < 3)
+                        snapshot[offset++] = meta[meta_index++];
+                    nmi_state = 0;
+                }
             }
             /*if (nmi_state && !meta[1])
             {
@@ -999,9 +1029,8 @@ int usbint_handler_dat(void) {
                 flag = 0;
                 nmi_state = 0;
             }*/
-            if (!reset)
-                reset = get_snes_reset();
-            snapshot[server_info.size - 2] = reset;
+            if (!meta[1])
+                meta[1] = get_snes_reset();
             memcpy((unsigned char *)send_buffer[send_buffer_index], (unsigned char *)snapshot + count, server_info.block_size);
             bytesSent = server_info.block_size;
             count += bytesSent;
@@ -1205,7 +1234,6 @@ int usbint_handler_dat(void) {
                 //PRINT_DAT((int)count, (int)server_info.size);
 
                 count = 0;
-                nmi_state = 0;
                 //PRINT_END();
             }
         }

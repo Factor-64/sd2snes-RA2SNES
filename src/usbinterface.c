@@ -643,6 +643,7 @@ int usbint_handler_cmd(void) {
 <<<<<<< HEAD
                 current_size = 0;
                 nmi_state = 0;
+                nmi_state = 0;
 =======
 >>>>>>> 2e0b076 (Added vector and nmi space)
                 server_info.size = server_info.total_size;

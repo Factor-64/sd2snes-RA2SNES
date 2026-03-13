@@ -1,5 +1,1 @@
-<<<<<<< HEAD
 RELEASE_VERSION = "01.011.02"
-=======
-RELEASE_VERSION = "RA2SNESv0.9.0rc2"
->>>>>>> 2e0b076 (Added vector and nmi space)

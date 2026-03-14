@@ -444,7 +444,7 @@ int main(void) {
       } else {
         if (resetState == SNES_RESET_SHORT) resetButtonState = 1;
         
-        if(getticks() > loop_ticks + 25 && !usbint_server_nmi()) {
+        if(getticks() > loop_ticks + 25) {
           loop_ticks = getticks();
  //         sram_reliable();
           printf("%s ", get_cic_statename(get_cic_state()));
@@ -496,4 +496,5 @@ int main(void) {
     }
     /* else reset */
   }
+  return 0;
 }

@@ -426,7 +426,7 @@ int main(void) {
       if (usb_cmd == SNES_CMD_GAMELOOP) usb_cmd = 0;
 
 //        sleep_ms(250);
-      sram_reliable();
+      //sram_reliable();
       
       // loop if we are in the middle of a reset
       if (usbint_server_reset()) continue;

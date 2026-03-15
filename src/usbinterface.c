@@ -331,7 +331,7 @@ void usbint_recv_block(void) {
                 count += bytesWritten;
             } while (bytesRecv != server_info.block_size && count < server_info.size);
         }
-         else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
+        else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
             static uint8_t temp_vector_bytes[4];
             static uint8_t temp_index = 0;
             UINT blockBytesWritten = 0;

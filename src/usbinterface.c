@@ -222,7 +222,7 @@ static uint16_t current_size  = 0;
 static uint8_t  ingame        = 0;
 static uint16_t vector_index  = 0;
 static uint8_t  nmi_state     = 0;
-static uint16_t vectors_total = 0;
+static uint32_t vectors_total = 0;
 
 static usbint_vector_t vectors[VECTORS_SIZE];
 
@@ -331,7 +331,7 @@ void usbint_recv_block(void) {
                 count += bytesWritten;
             } while (bytesRecv != server_info.block_size && count < server_info.size);
         }
-        else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
+         else if (server_info.space == USBINT_SERVER_SPACE_VECTOR) {
             static uint8_t temp_vector_bytes[4];
             static uint8_t temp_index = 0;
             UINT blockBytesWritten = 0;
@@ -360,7 +360,9 @@ void usbint_recv_block(void) {
         else if (server_info.space == USBINT_SERVER_SPACE_NMI) {
             current_size  = (recv_buffer[count] << 8) | recv_buffer[count + 1];
             count += 2;
-            vectors_total  = (recv_buffer[count] << 8) | recv_buffer[count + 1];
+            vectors_total = (recv_buffer[count] << 16) 
+                          | (recv_buffer[count + 1] << 8) 
+                          | recv_buffer[count + 2];
             count = server_info.size;
         }
         else {
@@ -548,14 +550,6 @@ int usbint_handler_cmd(void) {
             server_info.offset |= cmd_buffer[257]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[258]; server_info.offset <<= 8;
             server_info.offset |= cmd_buffer[259]; server_info.offset <<= 0;
-
-
-            if (server_info.offset == 0xFFFFFF) {
-                server_info.space = USBINT_SERVER_SPACE_NMI;
-            }
-            else if (server_info.offset == 0xFFFFFD) {
-                server_info.space = USBINT_SERVER_SPACE_VECTOR;
-            }
         }
         break;
     }
@@ -937,7 +931,7 @@ int usbint_handler_dat(void) {
 
                         uint16_t remaining = min(vec->size - vector_offset, SNAPSHOT_SIZE - offset);
 
-                        if ((meta & (1 << 1)))
+                        if (!(meta & (1 << 1)))
                             sram_readblock((uint8_t*)snapshot + offset, vec->addr + vector_offset, remaining);
 
                         offset        += remaining;
@@ -972,7 +966,7 @@ int usbint_handler_dat(void) {
             if (!(meta & (1 << 1)))
                 meta |= (get_snes_reset() & 1) << 1;
 
-            if(meta_offset != 0xFFFF)
+            if (meta_offset != 0xFFFF)
                 snapshot[meta_offset] = meta;
 
             memcpy((unsigned char *)send_buffer[send_buffer_index], (unsigned char *)snapshot + count, remaining);

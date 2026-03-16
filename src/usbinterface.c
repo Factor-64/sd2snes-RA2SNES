@@ -890,7 +890,7 @@ int usbint_handler_dat(void) {
             static uint8_t  meta = 0;
             static uint16_t meta_offset = 0;
             static uint8_t  meta_flag = 0;
-            static uint16_t nmi_total = 0;
+            static uint32_t nmi_total = 0;
 
             if (!nmi_state)
             {

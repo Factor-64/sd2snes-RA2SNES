@@ -225,7 +225,7 @@ static uint16_t current_size  = 0;
 static uint8_t  ingame        = 0;
 static uint16_t vector_index  = 0;
 static uint8_t  nmi_state     = 0;
-static uint32_t vectors_total = 0;
+static uint16_t vectors_total = 0;
 
 static usbint_vector_t vectors[VECTORS_SIZE];
 

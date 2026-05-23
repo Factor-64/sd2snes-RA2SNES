@@ -129,8 +129,5 @@ void usbint_check_connect(void);
 uint8_t usbint_server_nmi(void);
 void usbint_set_game_state(uint8_t state);
 
-<<<<<<< HEAD
-#endif
-=======
 #endif
 >>>>>>> 2e0b076 (Added vector and nmi space)

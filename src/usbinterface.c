@@ -909,12 +909,15 @@ int usbint_handler_dat(void) {
                 snescmd_readblock(buffer, 0x2A01, 3);
                 meta |= ((!(buffer[0] == 0 && buffer[2] == 0)) & 1) << 2;
                 //uint8_t nmi = snescmd_readbyte(NMI_COUNTER);
+                int ticks = getticks();
                 uint16_t prev_status = fpga_status();
                 while (1) {
                     uint16_t current_status = fpga_status();
 
-                    if ((prev_status & FPGA_STATUS_SNES_HOOK_ACTIVE) && 
-                        !(current_status & FPGA_STATUS_SNES_HOOK_ACTIVE)) {
+                    if (((prev_status & FPGA_STATUS_SNES_HOOK_ACTIVE) && 
+                    !(current_status & FPGA_STATUS_SNES_HOOK_ACTIVE)) ||
+                    getticks() >= ticks + 2) 
+                    {
                         break;
                     }
 
@@ -1225,20 +1228,18 @@ int usbint_handler_exe(void) {
         fpga_write_snescmd(0x00);
 
         // wait to make sure we are out of the code.
+        int ticks = getticks();
         uint16_t prev_status = fpga_status();
         while (1) {
             uint16_t current_status = fpga_status();
 
-            if ((prev_status & FPGA_STATUS_SNES_HOOK_ACTIVE) && 
-                !(current_status & FPGA_STATUS_SNES_HOOK_ACTIVE)) {
+            if (((prev_status & FPGA_STATUS_SNES_HOOK_ACTIVE) && 
+            !(current_status & FPGA_STATUS_SNES_HOOK_ACTIVE)) ||
+            getticks() >= ticks + 2) 
+            {
                 break;
             }
-
-            usbint_check_connect();
-            if (!(meta & (1 << 1)))
-                meta |= (get_snes_reset() & 1) << 1;
-            if ((meta & (1 << 1)) || !connected) break;
-
+            
             prev_status = current_status;
         }
 

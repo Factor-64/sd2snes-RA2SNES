@@ -908,15 +908,32 @@ int usbint_handler_dat(void) {
                 uint8_t buffer[3];
                 snescmd_readblock(buffer, 0x2A01, 3);
                 meta |= ((!(buffer[0] == 0 && buffer[2] == 0)) & 1) << 2;
-                uint8_t nmi = snescmd_readbyte(NMI_COUNTER);
-                while (nmi == snescmd_readbyte(NMI_COUNTER))
+                //uint8_t nmi = snescmd_readbyte(NMI_COUNTER);
+                uint16_t prev_status = fpga_status();
+                while (1) {
+                    uint16_t current_status = fpga_status();
+
+                    if ((prev_status & FPGA_STATUS_SNES_HOOK_ACTIVE) && 
+                        !(current_status & FPGA_STATUS_SNES_HOOK_ACTIVE)) {
+                        break;
+                    }
+
+                    usbint_check_connect();
+                    if (!(meta & (1 << 1)))
+                        meta |= (get_snes_reset() & 1) << 1;
+                    if ((meta & (1 << 1)) || !connected) break;
+
+                    prev_status = current_status;
+                }
+
+                /*while (nmi == snescmd_readbyte(NMI_COUNTER))
                 {
                     usbint_check_connect();
                     if (!(meta & (1 << 1)))
                         meta |= (get_snes_reset() & 1) << 1;
                     if ((meta & (1 << 1)) || !connected) break;
                     delay_us(8);
-                }
+                }*/
             }
             
             if(count == 0)
@@ -1207,9 +1224,23 @@ int usbint_handler_exe(void) {
         fpga_set_snescmd_addr(SNESCMD_EXE);
         fpga_write_snescmd(0x00);
 
-        // wait to make sure we are out of the code.  one frame should do
-        // TODO: could check with the fpga for this
-        sleep_ms(16);
+        // wait to make sure we are out of the code.
+        uint16_t prev_status = fpga_status();
+        while (1) {
+            uint16_t current_status = fpga_status();
+
+            if ((prev_status & FPGA_STATUS_SNES_HOOK_ACTIVE) && 
+                !(current_status & FPGA_STATUS_SNES_HOOK_ACTIVE)) {
+                break;
+            }
+
+            usbint_check_connect();
+            if (!(meta & (1 << 1)))
+                meta |= (get_snes_reset() & 1) << 1;
+            if ((meta & (1 << 1)) || !connected) break;
+
+            prev_status = current_status;
+        }
 
         for (int i = 1; i < server_info.size; i++) {
             uint8_t val = sram_readbyte(server_info.offset + i);
